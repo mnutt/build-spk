@@ -19,6 +19,10 @@ on:
         required: false
         type: string
         default: printf "sg sandstorm -c '/opt/app/.sandstorm/build.sh'\nexit\n" | lima-spk vm ssh
+      vm_timeout:
+        required: false
+        type: string
+        default: "10m"
       pack_mode:
         required: true
         type: string
@@ -97,6 +101,7 @@ jobs:
           sandstorm_keyring_b64: ${{ secrets.sandstorm_keyring_b64 }}
           lima_spk_bin: ${{ inputs.lima_spk_bin }}
           pre_pack_command: ${{ inputs.pre_pack_command }}
+          vm_timeout: ${{ inputs.vm_timeout }}
           pack_mode: ${{ inputs.pack_mode }}
           spk_output_path: ${{ inputs.spk_output_path }}
           artifact_name: ${{ inputs.artifact_name }}

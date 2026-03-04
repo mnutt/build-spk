@@ -31,6 +31,7 @@ Core optional:
 
 - `lima_spk_bin`
 - `pre_pack_command` (defaults to standard `.sandstorm/build.sh` in VM)
+- `vm_timeout` (default `10m`, passed to `lima-spk vm up --timeout`)
 - `pack_mode` (`release` or `test`)
 - `artifact_name`
 
@@ -85,7 +86,7 @@ jobs:
 
       - uses: mnutt/build-spk@main
         with:
-          sandstorm_keyring_b64: ${{ secrets.SANDSTORM_TEST_KEYRING_B64 }}
+          sandstorm_keyring_b64: ${{ secrets.SANDSTORM_TEST_APP_KEY_B64 }}
           pack_mode: test
           spk_output_path: build/my-app-${{ github.sha }}.spk
           artifact_name: my-app-test-spk-${{ github.sha }}
@@ -101,7 +102,7 @@ If you only want packaging and will wire publish/comment yourself:
 - id: build
   uses: mnutt/build-spk/actions/build@main
   with:
-    sandstorm_keyring_b64: ${{ secrets.SANDSTORM_KEYRING_B64 }}
+    sandstorm_keyring_b64: ${{ secrets.SANDSTORM_APP_KEY_B64 }}
     pack_mode: release
     spk_output_path: build/my-app-${{ github.sha }}.spk
 ```
@@ -123,7 +124,7 @@ jobs:
       publish_preview_release: true
       comment_pr_loader: true
     secrets:
-      sandstorm_keyring_b64: ${{ secrets.SANDSTORM_TEST_KEYRING_B64 }}
+      sandstorm_keyring_b64: ${{ secrets.SANDSTORM_TEST_APP_KEY_B64 }}
       github_token: ${{ github.token }}
 ```
 
@@ -131,3 +132,39 @@ jobs:
 
 - This repo does not install Node.js or build your app code; do that in the caller workflow.
 - If `lima_spk_bin` is missing, the action bootstraps `/tmp/vagrant-spk/lima-spk`.
+
+## Setting up GitHub secrets
+
+> [!WARNING]
+> App private keys, especially your production/release key, must remain strictly secret.
+> Do not allow untrusted users to run workflows that can access these secrets (for example via PR-triggered workflows with elevated permissions).
+
+Run this from your app repo root:
+
+```bash
+# 1) Ensure test app id/key exists (runs once)
+lima-spk pack --dev --set-version 0.0.0-dev /tmp/test.spk
+
+# 2) Export private key as base64
+TEST_APP_ID="$(cat .sandstorm/sandstorm-test-app-id)"
+TEST_APP_KEY_B64="$(lima-spk getkey "$TEST_APP_ID" | base64 | tr -d '\n')"
+
+# 3) Save to GitHub Actions secret
+gh secret set SANDSTORM_TEST_APP_KEY_B64 --body "$TEST_APP_KEY_B64"
+```
+
+## Setting up production app key secret
+
+For production/release keys, there is no `.sandstorm/sandstorm-test-app-id` helper file.
+Retrieve your app ID from `.sandstorm/sandstorm-pkgdef.capnp`, then run:
+
+```bash
+# 1) Set app id manually from .sandstorm/sandstorm-pkgdef.capnp
+APP_ID="<your-app-id-from-sandstorm-pkgdef.capnp>"
+
+# 2) Export private key as base64
+APP_KEY_B64="$(lima-spk getkey "$APP_ID" | base64 | tr -d '\n')"
+
+# 3) Save to GitHub Actions secret
+gh secret set SANDSTORM_APP_KEY_B64 --body "$APP_KEY_B64"
+```

@@ -13,6 +13,10 @@ inputs:
     description: Command run after VM init and before packing. Defaults to standard Sandstorm build.sh invocation.
     required: false
     default: printf "sg sandstorm -c '/opt/app/.sandstorm/build.sh'\nexit\n" | lima-spk vm ssh
+  vm_timeout:
+    description: Timeout duration passed to `lima-spk vm up --timeout` (for example `10m`, `1200s`). Default is `10m`.
+    required: false
+    default: "10m"
   pack_mode:
     description: SPK pack mode. Use "test" for --dev with SHA versioning.
     required: false
@@ -86,7 +90,10 @@ runs:
 
     - name: Initialize Lima VM
       shell: bash
-      run: ${{ steps.resolve-lima-spk.outputs.lima_spk_bin }} vm up
+      env:
+        LIMA_SPK_BIN: ${{ steps.resolve-lima-spk.outputs.lima_spk_bin }}
+        VM_TIMEOUT: ${{ inputs.vm_timeout }}
+      run: $LIMA_SPK_BIN vm up --timeout "$VM_TIMEOUT"
 
     - name: Run pre-pack command
       shell: bash
