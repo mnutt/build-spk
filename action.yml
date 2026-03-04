@@ -28,10 +28,6 @@ inputs:
     description: If set, uploads the generated SPK as an artifact with this name.
     required: false
     default: ""
-  github_token:
-    description: Token for optional publish/comment steps. Falls back to github.token when omitted.
-    required: false
-    default: ""
   publish_preview_release:
     description: If true and pack_mode=test, upload SPK to preview release.
     required: false
@@ -113,7 +109,6 @@ runs:
       if: inputs.publish_preview_release == 'true' && inputs.pack_mode == 'test'
       uses: ./actions/publish-preview-spk
       with:
-        github_token: ${{ inputs.github_token != '' && inputs.github_token || github.token }}
         spk_path: ${{ inputs.spk_output_path }}
         release_tag: ${{ inputs.release_tag }}
         release_name: ${{ inputs.release_name }}
@@ -127,7 +122,6 @@ runs:
       if: inputs.comment_pr_loader == 'true' && inputs.pack_mode == 'test'
       uses: ./actions/comment-pr-loader
       with:
-        github_token: ${{ inputs.github_token != '' && inputs.github_token || github.token }}
         spk_http_url: ${{ steps.publish-preview.outputs.spk_http_url }}
         package_id: ${{ steps.publish-preview.outputs.package_id }}
         loader_base_url: ${{ inputs.loader_base_url }}

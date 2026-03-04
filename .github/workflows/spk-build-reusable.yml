@@ -72,8 +72,6 @@ on:
     secrets:
       sandstorm_keyring_b64:
         required: true
-      github_token:
-        required: false
 
 jobs:
   build-spk:
@@ -105,7 +103,6 @@ jobs:
           pack_mode: ${{ inputs.pack_mode }}
           spk_output_path: ${{ inputs.spk_output_path }}
           artifact_name: ${{ inputs.artifact_name }}
-          github_token: ${{ secrets.github_token || github.token }}
           publish_preview_release: ${{ inputs.publish_preview_release && 'true' || 'false' }}
           release_tag: ${{ inputs.release_tag }}
           release_name: ${{ inputs.release_name }}

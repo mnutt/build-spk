@@ -37,7 +37,6 @@ Core optional:
 
 Publish/comment optional:
 
-- `github_token` (falls back to `github.token` if omitted)
 - `publish_preview_release` (`"true"`/`"false"`)
 - `release_tag`
 - `release_name`
@@ -125,7 +124,6 @@ jobs:
       comment_pr_loader: true
     secrets:
       sandstorm_keyring_b64: ${{ secrets.SANDSTORM_TEST_APP_KEY_B64 }}
-      github_token: ${{ github.token }}
 ```
 
 ## Notes

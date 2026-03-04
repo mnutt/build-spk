@@ -2,9 +2,6 @@ name: Comment PR Loader Link
 description: Create or update a PR comment with Sandstorm test loader and SPK links.
 
 inputs:
-  github_token:
-    description: GitHub token with pull-requests:write and issues:write permissions.
-    required: true
   spk_http_url:
     description: Download URL of the SPK file.
     required: true
@@ -43,7 +40,7 @@ runs:
         ISSUE_NUMBER: ${{ inputs.issue_number }}
         MARKER: ${{ inputs.marker }}
       with:
-        github-token: ${{ inputs.github_token }}
+        github-token: ${{ github.token }}
         script: |
           const owner = context.repo.owner;
           const repo = context.repo.repo;
