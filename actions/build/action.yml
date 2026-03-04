@@ -108,7 +108,7 @@ runs:
         if [ "${{ inputs.pack_mode }}" = "test" ]; then
           pack_json="$(${{ steps.resolve-lima-spk.outputs.lima_spk_bin }} pack --dev --set-version "${GITHUB_SHA}" "${{ inputs.spk_output_path }}")"
           printf '%s\n' "$pack_json"
-          package_id="$(printf '%s\n' "$pack_json" | jq -r '.packageId // empty')"
+          package_id="$(printf '%s\n' "$pack_json" | sed -n 's/.*"packageId":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
           if [ -n "$package_id" ]; then
             echo "package_id=$package_id" >> "$GITHUB_OUTPUT"
           fi
