@@ -1,0 +1,130 @@
+name: Build Sandstorm SPK
+description: End-to-end SPK flow (build, optional preview publish, optional PR comment).
+
+inputs:
+  sandstorm_keyring_b64:
+    description: Base64-encoded Sandstorm signing keyring contents.
+    required: true
+  lima_spk_bin:
+    description: Path to an existing lima-spk executable. If missing, the action bootstraps /tmp/vagrant-spk/lima-spk.
+    required: false
+    default: /tmp/vagrant-spk/lima-spk
+  pre_pack_command:
+    description: Command run after VM init and before packing. Defaults to standard Sandstorm build.sh invocation.
+    required: false
+    default: printf "sg sandstorm -c '/opt/app/.sandstorm/build.sh'\nexit\n" | lima-spk vm ssh
+  pack_mode:
+    description: SPK pack mode. Use "test" for --dev with SHA versioning.
+    required: false
+    default: release
+  spk_output_path:
+    description: Output path for the built SPK file.
+    required: true
+  artifact_name:
+    description: If set, uploads the generated SPK as an artifact with this name.
+    required: false
+    default: ""
+  github_token:
+    description: Token for optional publish/comment steps. Falls back to github.token when omitted.
+    required: false
+    default: ""
+  publish_preview_release:
+    description: If true and pack_mode=test, upload SPK to preview release.
+    required: false
+    default: "false"
+  release_tag:
+    description: Tag name for preview release.
+    required: false
+    default: pr-test-apps
+  release_name:
+    description: Display name for preview release.
+    required: false
+    default: PR Test Apps
+  release_body:
+    description: Body text for preview release.
+    required: false
+    default: Preview SPK assets for pull request testing. These assets are ephemeral and should not be used as stable release artifacts.
+  preview_max_age_days:
+    description: Delete preview assets older than this many days.
+    required: false
+    default: "30"
+  preview_max_assets:
+    description: Keep at most this many preview assets after pruning oldest.
+    required: false
+    default: "200"
+  comment_pr_loader:
+    description: If true and pack_mode=test, create/update PR loader comment.
+    required: false
+    default: "false"
+  loader_base_url:
+    description: Base URL for the test app loader.
+    required: false
+    default: https://mnutt.github.io/sandstorm-test-app-loader/
+  issue_number:
+    description: Optional PR number for comment action; defaults to event context.
+    required: false
+    default: ""
+  loader_comment_marker:
+    description: Hidden marker used to find/update loader comment.
+    required: false
+    default: "<!-- sandstorm-pr-test-loader -->"
+
+outputs:
+  package_id:
+    description: Detected packageId from test pack mode.
+    value: ${{ steps.build.outputs.package_id }}
+  spk_http_url:
+    description: Preview release download URL when publish step runs.
+    value: ${{ steps.publish-preview.outputs.spk_http_url }}
+  loader_url:
+    description: Loader URL used in PR comment when comment step runs.
+    value: ${{ steps.comment-loader.outputs.loader_url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate publish/comment settings
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "${{ inputs.comment_pr_loader }}" = "true" ] && [ "${{ inputs.publish_preview_release }}" != "true" ]; then
+          echo "::error::comment_pr_loader=true requires publish_preview_release=true"
+          exit 1
+        fi
+
+    - name: Build SPK
+      id: build
+      uses: ./actions/build
+      with:
+        sandstorm_keyring_b64: ${{ inputs.sandstorm_keyring_b64 }}
+        lima_spk_bin: ${{ inputs.lima_spk_bin }}
+        pre_pack_command: ${{ inputs.pre_pack_command }}
+        pack_mode: ${{ inputs.pack_mode }}
+        spk_output_path: ${{ inputs.spk_output_path }}
+        artifact_name: ${{ inputs.artifact_name }}
+
+    - name: Publish test SPK to preview release
+      id: publish-preview
+      if: inputs.publish_preview_release == 'true' && inputs.pack_mode == 'test'
+      uses: ./actions/publish-preview-spk
+      with:
+        github_token: ${{ inputs.github_token != '' && inputs.github_token || github.token }}
+        spk_path: ${{ inputs.spk_output_path }}
+        release_tag: ${{ inputs.release_tag }}
+        release_name: ${{ inputs.release_name }}
+        release_body: ${{ inputs.release_body }}
+        max_age_days: ${{ inputs.preview_max_age_days }}
+        max_assets: ${{ inputs.preview_max_assets }}
+        package_id: ${{ steps.build.outputs.package_id }}
+
+    - name: Comment test app loader URL on PR
+      id: comment-loader
+      if: inputs.comment_pr_loader == 'true' && inputs.pack_mode == 'test'
+      uses: ./actions/comment-pr-loader
+      with:
+        github_token: ${{ inputs.github_token != '' && inputs.github_token || github.token }}
+        spk_http_url: ${{ steps.publish-preview.outputs.spk_http_url }}
+        package_id: ${{ steps.publish-preview.outputs.package_id }}
+        loader_base_url: ${{ inputs.loader_base_url }}
+        issue_number: ${{ inputs.issue_number }}
+        marker: ${{ inputs.loader_comment_marker }}

@@ -1,0 +1,169 @@
+name: Publish Preview SPK
+description: Upload an SPK file to a prerelease and prune old assets.
+
+inputs:
+  github_token:
+    description: GitHub token with contents:write permissions.
+    required: true
+  spk_path:
+    description: Local filesystem path to the SPK file to upload.
+    required: true
+  release_tag:
+    description: Tag name for preview release.
+    required: false
+    default: pr-test-apps
+  release_name:
+    description: Display name for preview release.
+    required: false
+    default: PR Test Apps
+  release_body:
+    description: Body text for preview release.
+    required: false
+    default: Preview SPK assets for pull request testing. These assets are ephemeral and should not be used as stable release artifacts.
+  max_age_days:
+    description: Delete assets older than this many days.
+    required: false
+    default: "30"
+  max_assets:
+    description: Keep at most this many assets after pruning oldest.
+    required: false
+    default: "200"
+  package_id:
+    description: Optional package ID to pass through as output.
+    required: false
+    default: ""
+
+outputs:
+  spk_http_url:
+    description: Release download URL for the uploaded SPK.
+    value: ${{ steps.publish.outputs.spk_http_url }}
+  package_id:
+    description: Package ID passed through from input.
+    value: ${{ steps.publish.outputs.package_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Publish preview SPK asset
+      id: publish
+      uses: actions/github-script@v7
+      env:
+        SPK_PATH: ${{ inputs.spk_path }}
+        RELEASE_TAG: ${{ inputs.release_tag }}
+        RELEASE_NAME: ${{ inputs.release_name }}
+        RELEASE_BODY: ${{ inputs.release_body }}
+        MAX_AGE_DAYS: ${{ inputs.max_age_days }}
+        MAX_ASSETS: ${{ inputs.max_assets }}
+        PACKAGE_ID: ${{ inputs.package_id }}
+      with:
+        github-token: ${{ inputs.github_token }}
+        script: |
+          const fs = require("fs");
+          const path = require("path");
+
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          const tag = process.env.RELEASE_TAG;
+          const releaseName = process.env.RELEASE_NAME;
+          const releaseBody = process.env.RELEASE_BODY;
+          const maxAgeDays = Number(process.env.MAX_AGE_DAYS || "30");
+          const maxAssets = Number(process.env.MAX_ASSETS || "200");
+
+          async function getOrCreatePrerelease() {
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+            const existing = releases.find((release) => release.tag_name === tag);
+            if (existing) {
+              if (existing.draft || !existing.prerelease) {
+                const updated = await github.rest.repos.updateRelease({
+                  owner,
+                  repo,
+                  release_id: existing.id,
+                  name: releaseName,
+                  body: releaseBody,
+                  draft: false,
+                  prerelease: true,
+                });
+                return updated.data;
+              }
+              return existing;
+            }
+
+            const created = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              name: releaseName,
+              body: releaseBody,
+              draft: false,
+              prerelease: true,
+            });
+            return created.data;
+          }
+
+          async function listAssets(releaseId) {
+            return await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: releaseId,
+              per_page: 100,
+            });
+          }
+
+          const release = await getOrCreatePrerelease();
+          const spkPath = process.env.SPK_PATH;
+          const assetName = path.basename(spkPath);
+          const data = fs.readFileSync(spkPath);
+
+          const currentAssets = await listAssets(release.id);
+          const sameName = currentAssets.find((asset) => asset.name === assetName);
+          if (sameName) {
+            await github.rest.repos.deleteReleaseAsset({
+              owner,
+              repo,
+              asset_id: sameName.id,
+            });
+          }
+
+          await github.rest.repos.uploadReleaseAsset({
+            owner,
+            repo,
+            release_id: release.id,
+            name: assetName,
+            data,
+            headers: {
+              "content-type": "application/octet-stream",
+              "content-length": data.length,
+            },
+          });
+
+          let assets = await listAssets(release.id);
+          const now = Date.now();
+          const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+          const staleAssets = assets.filter((asset) => now - new Date(asset.created_at).getTime() > maxAgeMs);
+
+          for (const asset of staleAssets) {
+            await github.rest.repos.deleteReleaseAsset({
+              owner,
+              repo,
+              asset_id: asset.id,
+            });
+          }
+
+          assets = await listAssets(release.id);
+          const sortedOldestFirst = assets.slice().sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+          const overflowCount = Math.max(0, sortedOldestFirst.length - maxAssets);
+          for (const asset of sortedOldestFirst.slice(0, overflowCount)) {
+            await github.rest.repos.deleteReleaseAsset({
+              owner,
+              repo,
+              asset_id: asset.id,
+            });
+          }
+
+          const spkHttpUrl = `https://github.com/${owner}/${repo}/releases/download/${tag}/${encodeURIComponent(assetName)}`;
+          core.setOutput("spk_http_url", spkHttpUrl);
+          core.setOutput("package_id", process.env.PACKAGE_ID || "");

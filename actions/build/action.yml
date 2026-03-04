@@ -1,0 +1,117 @@
+name: Build Sandstorm SPK
+description: Build and optionally upload a Sandstorm SPK artifact using lima-spk.
+
+inputs:
+  sandstorm_keyring_b64:
+    description: Base64-encoded Sandstorm signing keyring contents.
+    required: true
+  lima_spk_bin:
+    description: Path to an existing lima-spk executable. If missing, the action bootstraps /tmp/vagrant-spk/lima-spk.
+    required: false
+    default: /tmp/vagrant-spk/lima-spk
+  pre_pack_command:
+    description: Command run after VM init and before packing. Defaults to standard Sandstorm build.sh invocation.
+    required: false
+    default: printf "sg sandstorm -c '/opt/app/.sandstorm/build.sh'\nexit\n" | lima-spk vm ssh
+  pack_mode:
+    description: SPK pack mode. Use "test" for --dev with SHA versioning.
+    required: false
+    default: release
+  spk_output_path:
+    description: Output path for the built SPK file.
+    required: true
+  artifact_name:
+    description: If set, uploads the generated SPK as an artifact with this name.
+    required: false
+    default: ""
+
+outputs:
+  package_id:
+    description: Detected packageId from test pack mode.
+    value: ${{ steps.build-spk.outputs.package_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve lima-spk binary
+      id: resolve-lima-spk
+      shell: bash
+      env:
+        REQUESTED_LIMA_SPK_BIN: ${{ inputs.lima_spk_bin }}
+      run: |
+        set -euo pipefail
+        default_bin="/tmp/vagrant-spk/lima-spk"
+        resolved_bin="$REQUESTED_LIMA_SPK_BIN"
+
+        if [ -x "$resolved_bin" ]; then
+          echo "Using caller-provided lima-spk binary at $resolved_bin"
+        else
+          echo "lima-spk not found at $resolved_bin; bootstrapping default vagrant-spk copy"
+          rm -rf /tmp/vagrant-spk
+          git clone --depth 1 --branch spk-pack-dev https://github.com/mnutt/vagrant-spk /tmp/vagrant-spk
+          resolved_bin="$default_bin"
+        fi
+
+        if [ ! -x "$resolved_bin" ]; then
+          echo "::error::Unable to locate executable lima-spk at $resolved_bin"
+          exit 1
+        fi
+
+        echo "$(dirname "$resolved_bin")" >> "$GITHUB_PATH"
+        echo "lima_spk_bin=$resolved_bin" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Lima
+      uses: lima-vm/lima-actions/setup@v1
+      id: lima-actions-setup
+
+    - name: Cache ~/.cache/lima
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/lima
+        key: lima-${{ steps.lima-actions-setup.outputs.version }}
+
+    - name: Restore Sandstorm signing keyring
+      shell: bash
+      env:
+        SANDSTORM_KEYRING_B64: ${{ inputs.sandstorm_keyring_b64 }}
+      run: |
+        set -euo pipefail
+        if [ -z "${SANDSTORM_KEYRING_B64:-}" ]; then
+          echo "::error::Missing required input sandstorm_keyring_b64"
+          exit 1
+        fi
+        mkdir -p "$HOME/.sandstorm"
+        printf '%s' "$SANDSTORM_KEYRING_B64" | base64 --decode > "$HOME/.sandstorm/sandstorm-keyring"
+        chmod 600 "$HOME/.sandstorm/sandstorm-keyring"
+
+    - name: Initialize Lima VM
+      shell: bash
+      run: ${{ steps.resolve-lima-spk.outputs.lima_spk_bin }} vm up
+
+    - name: Run pre-pack command
+      shell: bash
+      run: ${{ inputs.pre_pack_command }}
+
+    - name: Build SPK
+      id: build-spk
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$(dirname "${{ inputs.spk_output_path }}")"
+        if [ "${{ inputs.pack_mode }}" = "test" ]; then
+          pack_json="$(${{ steps.resolve-lima-spk.outputs.lima_spk_bin }} pack --dev --set-version "${GITHUB_SHA}" "${{ inputs.spk_output_path }}")"
+          printf '%s\n' "$pack_json"
+          package_id="$(printf '%s\n' "$pack_json" | jq -r '.packageId // empty')"
+          if [ -n "$package_id" ]; then
+            echo "package_id=$package_id" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          ${{ steps.resolve-lima-spk.outputs.lima_spk_bin }} pack "${{ inputs.spk_output_path }}"
+        fi
+
+    - name: Upload SPK artifact
+      if: inputs.artifact_name != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: ${{ inputs.spk_output_path }}

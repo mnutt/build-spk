@@ -1,0 +1,112 @@
+name: SPK Build Reusable
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        required: false
+        type: string
+        default: spk
+      checkout_pr_head_for_pr_target:
+        required: false
+        type: boolean
+        default: false
+      lima_spk_bin:
+        required: false
+        type: string
+        default: /tmp/vagrant-spk/lima-spk
+      pre_pack_command:
+        required: false
+        type: string
+        default: printf "sg sandstorm -c '/opt/app/.sandstorm/build.sh'\nexit\n" | lima-spk vm ssh
+      pack_mode:
+        required: true
+        type: string
+      spk_output_path:
+        required: true
+        type: string
+      artifact_name:
+        required: false
+        type: string
+        default: ""
+      publish_preview_release:
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        required: false
+        type: string
+        default: pr-test-apps
+      release_name:
+        required: false
+        type: string
+        default: PR Test Apps
+      release_body:
+        required: false
+        type: string
+        default: Preview SPK assets for pull request testing. These assets are ephemeral and should not be used as stable release artifacts.
+      preview_max_age_days:
+        required: false
+        type: string
+        default: "30"
+      preview_max_assets:
+        required: false
+        type: string
+        default: "200"
+      comment_pr_loader:
+        required: false
+        type: boolean
+        default: false
+      loader_base_url:
+        required: false
+        type: string
+        default: https://mnutt.github.io/sandstorm-test-app-loader/
+      loader_comment_marker:
+        required: false
+        type: string
+        default: "<!-- sandstorm-pr-test-loader -->"
+    secrets:
+      sandstorm_keyring_b64:
+        required: true
+      github_token:
+        required: false
+
+jobs:
+  build-spk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    if: always()
+    environment: ${{ inputs.environment_name }}
+
+    steps:
+      - name: Check out PR head
+        if: github.event_name == 'pull_request_target' && inputs.checkout_pr_head_for_pr_target
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check out repository
+        if: github.event_name != 'pull_request_target' || !inputs.checkout_pr_head_for_pr_target
+        uses: actions/checkout@v4
+
+      - name: Build SPK
+        id: build
+        uses: mnutt/build-spk@main
+        with:
+          sandstorm_keyring_b64: ${{ secrets.sandstorm_keyring_b64 }}
+          lima_spk_bin: ${{ inputs.lima_spk_bin }}
+          pre_pack_command: ${{ inputs.pre_pack_command }}
+          pack_mode: ${{ inputs.pack_mode }}
+          spk_output_path: ${{ inputs.spk_output_path }}
+          artifact_name: ${{ inputs.artifact_name }}
+          github_token: ${{ secrets.github_token || github.token }}
+          publish_preview_release: ${{ inputs.publish_preview_release && 'true' || 'false' }}
+          release_tag: ${{ inputs.release_tag }}
+          release_name: ${{ inputs.release_name }}
+          release_body: ${{ inputs.release_body }}
+          preview_max_age_days: ${{ inputs.preview_max_age_days }}
+          preview_max_assets: ${{ inputs.preview_max_assets }}
+          comment_pr_loader: ${{ inputs.comment_pr_loader && 'true' || 'false' }}
+          loader_base_url: ${{ inputs.loader_base_url }}
+          loader_comment_marker: ${{ inputs.loader_comment_marker }}
